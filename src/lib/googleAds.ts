@@ -27,3 +27,4 @@ export function getGoogleAdsCustomer() {
 
 export const KEYWORD_PLAN_NETWORK = enums.KeywordPlanNetwork;
 export const KEYWORD_PLAN_COMPETITION_LEVEL = enums.KeywordPlanCompetitionLevel;
+export const KEYWORD_MATCH_TYPE = enums.KeywordMatchType;

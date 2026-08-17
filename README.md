@@ -1,9 +1,13 @@
 # Ads Keyword Estimator
 
-A Google Ads Keyword Planner-style app: enter seed keywords or a landing page URL and get
-keyword ideas with average monthly search volume, competition level, and top-of-page bid
-estimates. Data comes live from the real Google Ads API (`KeywordPlanIdeaService`) — the same
-service Keyword Planner itself is built on.
+A Google Ads Keyword Planner-style app with the same two tools as Keyword Planner itself,
+both backed live by the real Google Ads API (`KeywordPlanIdeaService`):
+
+- **Discover new keywords** — enter seed keywords or a landing page URL and get keyword
+  ideas with average monthly search volume, competition level, and top-of-page bid estimates.
+- **Get search volume and forecasts** — enter keywords you already have to get their exact
+  historical search volume/competition, plus a campaign forecast (clicks, cost, conversions,
+  avg. CPC/CPA) for a given bid, budget, and date range.
 
 ## Setup
 
@@ -59,6 +63,15 @@ Open [http://localhost:3000](http://localhost:3000).
   browser.
 - `src/components/KeywordIdeasTool.tsx` is the client UI: a form plus a sortable results
   table (keyword, avg. monthly searches, competition, low/high top-of-page bid).
+- `src/app/api/search-volume-forecast/route.ts` calls
+  `KeywordPlanIdeaService.GenerateKeywordHistoricalMetrics` (exact-keyword search volume) and
+  `GenerateKeywordForecastMetrics` (projected clicks/cost/conversions for a hypothetical
+  campaign — match type, max CPC bid, optional daily budget, and date range) in parallel.
+- `src/components/SearchVolumeForecastTool.tsx` is the client UI for that: keyword/targeting
+  inputs, bid + date range controls, forecast stat cards, and a per-keyword search volume
+  table.
+- `src/components/AdsEstimatorTabs.tsx` switches between the two tools, mirroring Keyword
+  Planner's own tabs.
 - `src/lib/constants.ts` has a curated shortlist of common Google Ads
   [geo target constants](https://developers.google.com/google-ads/api/data/geotargets) and
   language constants for the location/language selectors. Add more IDs from that reference
@@ -70,3 +83,7 @@ Open [http://localhost:3000](http://localhost:3000).
   the selected location/language — the same figures Keyword Planner shows for that account.
 - The Google Ads API has rate limits and quota tied to your developer token's access level;
   heavy use may need Standard access.
+- The forecast tool applies one match type (Broad/Phrase/Exact) to all keywords in a request,
+  a simplification of Keyword Planner's per-keyword match type control.
+- Google Ads API forecast periods must be in the future and are capped at a limited window
+  (currently up to 90 days); an out-of-range date range returns an API error.

@@ -1,4 +1,4 @@
-import KeywordIdeasTool from "@/components/KeywordIdeasTool";
+import AdsEstimatorTabs from "@/components/AdsEstimatorTabs";
 
 export default function Home() {
   return (
@@ -6,12 +6,11 @@ export default function Home() {
       <header className="w-full max-w-5xl mx-auto flex flex-col gap-2">
         <h1 className="text-2xl font-semibold">Ads Keyword Estimator</h1>
         <p className="text-sm text-black/60 dark:text-white/60">
-          Enter seed keywords or a landing page URL to get keyword ideas with average monthly
-          search volume, competition, and top-of-page bid estimates — sourced live from the
-          Google Ads API, the same data behind Keyword Planner.
+          Search volume, competition, bid estimates, and campaign forecasts — sourced live
+          from the Google Ads API, the same data behind Keyword Planner.
         </p>
       </header>
-      <KeywordIdeasTool />
+      <AdsEstimatorTabs />
     </div>
   );
 }
