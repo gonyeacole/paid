@@ -3,16 +3,18 @@
 import { useState } from "react";
 import KeywordIdeasTool from "@/components/KeywordIdeasTool";
 import SearchVolumeForecastTool from "@/components/SearchVolumeForecastTool";
+import BudgetTrackingTool from "@/components/BudgetTrackingTool";
 
 const TABS = [
   { id: "discover", label: "Discover new keywords" },
   { id: "forecast", label: "Get search volume and forecasts" },
+  { id: "budget", label: "Budget tracking" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
 export default function AdsEstimatorTabs() {
-  const [activeTab, setActiveTab] = useState<TabId>("forecast");
+  const [activeTab, setActiveTab] = useState<TabId>("budget");
 
   return (
     <div className="flex flex-col gap-6">
@@ -33,7 +35,9 @@ export default function AdsEstimatorTabs() {
         ))}
       </div>
 
-      {activeTab === "discover" ? <KeywordIdeasTool /> : <SearchVolumeForecastTool />}
+      {activeTab === "discover" && <KeywordIdeasTool />}
+      {activeTab === "forecast" && <SearchVolumeForecastTool />}
+      {activeTab === "budget" && <BudgetTrackingTool />}
     </div>
   );
 }

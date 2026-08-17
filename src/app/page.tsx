@@ -6,8 +6,8 @@ export default function Home() {
       <header className="w-full max-w-5xl mx-auto flex flex-col gap-2">
         <h1 className="text-2xl font-semibold">Ads Keyword Estimator</h1>
         <p className="text-sm text-black/60 dark:text-white/60">
-          Search volume, competition, bid estimates, and campaign forecasts — sourced live
-          from the Google Ads API, the same data behind Keyword Planner.
+          Search volume, competition, bid estimates, campaign forecasts, and live budget
+          pacing — sourced directly from the Google Ads API.
         </p>
       </header>
       <AdsEstimatorTabs />

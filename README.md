@@ -8,6 +8,10 @@ both backed live by the real Google Ads API (`KeywordPlanIdeaService`):
 - **Get search volume and forecasts** — enter keywords you already have to get their exact
   historical search volume/competition, plus a campaign forecast (clicks, cost, conversions,
   avg. CPC/CPA) for a given bid, budget, and date range.
+- **Budget tracking** — a live pacing dashboard for your account's actual campaigns: today's
+  spend vs. daily budget and month-to-date spend vs. expected-to-date budget, per campaign and
+  totaled across the account, with a projected month-end spend and an under/on-pace/over-pace
+  status for each campaign.
 
 ## Setup
 
@@ -70,7 +74,15 @@ Open [http://localhost:3000](http://localhost:3000).
 - `src/components/SearchVolumeForecastTool.tsx` is the client UI for that: keyword/targeting
   inputs, bid + date range controls, forecast stat cards, and a per-keyword search volume
   table.
-- `src/components/AdsEstimatorTabs.tsx` switches between the two tools, mirroring Keyword
+- `src/app/api/budget-tracking/route.ts` runs three GAQL queries in parallel against the
+  `campaign` resource: each campaign's current budget, today's cost, and month-to-date cost
+  (plus one query for the account's name/currency). It computes an expected-to-date budget
+  (daily budget × days elapsed this month) and a projected month-end spend (month-to-date
+  spend annualized to the full month) per campaign.
+- `src/components/BudgetTrackingTool.tsx` is the client UI: account-level stat cards (daily
+  budget, today's spend, month-to-date spend, projected month total) and a per-campaign list
+  with today/month-to-date pacing bars and an under/on-pace/over-pace badge.
+- `src/components/AdsEstimatorTabs.tsx` switches between the three tools, mirroring Keyword
   Planner's own tabs.
 - `src/lib/constants.ts` has a curated shortlist of common Google Ads
   [geo target constants](https://developers.google.com/google-ads/api/data/geotargets) and
@@ -87,3 +99,7 @@ Open [http://localhost:3000](http://localhost:3000).
   a simplification of Keyword Planner's per-keyword match type control.
 - Google Ads API forecast periods must be in the future and are capped at a limited window
   (currently up to 90 days); an out-of-range date range returns an API error.
+- Budget tracking treats "today" and "this month" using the server's UTC clock, which may be
+  off by a few hours from the account's own timezone near midnight. Campaigns that share a
+  budget with another campaign will each show that budget's full amount rather than a
+  per-campaign split.
