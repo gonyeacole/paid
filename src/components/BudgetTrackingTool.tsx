@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { formatBidMicros } from "@/lib/format";
+import SpendPacingChart, { type SpendPacingPoint } from "@/components/dashboard/SpendPacingChart";
+import { IconWallet, IconTarget, IconCalendar, IconTrendingUp } from "@/components/dashboard/icons";
 
 type CampaignBudget = {
   id: string;
@@ -23,6 +25,7 @@ type AccountBudget = {
   name: string | null;
   currencyCode: string;
   campaigns: CampaignBudget[];
+  dailySpend: { day: number; spendMicros: number }[];
   error: string | null;
 };
 
@@ -41,6 +44,10 @@ type Totals = {
   monthlyBudgetTargetMicros: number;
   projectedMonthSpendMicros: number;
 };
+
+type CampaignRow = CampaignBudget & { accountId: string; accountName: string };
+
+type SortKey = "name" | "accountName" | "dailyBudgetMicros" | "todaySpendMicros" | "mtdSpendMicros" | "mtdPacingPercent";
 
 const STATUS_LABELS: Record<string, string> = {
   ENABLED: "Active",
@@ -76,23 +83,20 @@ function mtdPacingPercent(totals: Totals): number | null {
 }
 
 function pacingStatus(percent: number | null): { label: string; className: string } {
-  if (percent === null) return { label: "No budget set", className: "text-gray-500 bg-gray-100" };
-  if (percent > 110) return { label: "Over pacing", className: "text-red-600 bg-red-50" };
-  if (percent < 85) return { label: "Under pacing", className: "text-amber-600 bg-amber-50" };
-  return { label: "On pace", className: "text-emerald-600 bg-emerald-50" };
-}
-
-function barColor(percent: number | null): string {
-  if (percent === null) return "bg-gray-300";
-  if (percent > 110) return "bg-red-500";
-  if (percent < 85) return "bg-amber-500";
-  return "bg-emerald-500";
+  if (percent === null) return { label: "No budget set", className: "text-gray-500 bg-gray-100 dark:bg-white/10" };
+  if (percent > 110) return { label: "Over pacing", className: "text-(--status-critical) bg-(--status-critical)/10" };
+  if (percent < 85) return { label: "Under pacing", className: "text-(--status-warning) bg-(--status-warning)/15" };
+  return { label: "On pace", className: "text-(--status-good) bg-(--status-good)/10" };
 }
 
 export default function BudgetTrackingTool() {
   const [data, setData] = useState<BudgetData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
+    key: "dailyBudgetMicros",
+    dir: "desc",
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -121,27 +125,83 @@ export default function BudgetTrackingTool() {
   const okAccounts = accounts.filter((a) => !a.error);
   const currencies = new Set(okAccounts.map((a) => a.currencyCode));
   const blendedCurrency = currencies.size === 1 ? [...currencies][0] : null;
-  const grandTotals = blendedCurrency
-    ? sumTotals(okAccounts.flatMap((a) => a.campaigns))
-    : null;
+  const blendedAccounts = blendedCurrency ? okAccounts : [];
+  const grandTotals = blendedCurrency ? sumTotals(blendedAccounts.flatMap((a) => a.campaigns)) : null;
   const grandPacing = grandTotals ? mtdPacingPercent(grandTotals) : null;
+  const grandStatus = pacingStatus(grandPacing);
+
+  const chartPoints: SpendPacingPoint[] = useMemo(() => {
+    if (!data || !grandTotals || blendedAccounts.length === 0) return [];
+    const dailyActualByDay = new Map<number, number>();
+    for (const account of blendedAccounts) {
+      for (const { day, spendMicros } of account.dailySpend) {
+        dailyActualByDay.set(day, (dailyActualByDay.get(day) ?? 0) + spendMicros);
+      }
+    }
+    const monthName = new Date(data.asOf).toLocaleString("en-US", { month: "short" });
+    let cumulativeActual = 0;
+    const points: SpendPacingPoint[] = [];
+    for (let day = 1; day <= data.daysInMonth; day++) {
+      if (day <= data.dayOfMonth) {
+        cumulativeActual += dailyActualByDay.get(day) ?? 0;
+      }
+      points.push({
+        day,
+        label: `${monthName} ${day}`,
+        actualCumulativeMicros: day <= data.dayOfMonth ? cumulativeActual : null,
+        budgetCumulativeMicros: grandTotals.dailyBudgetMicros * day,
+      });
+    }
+    return points;
+    // blendedAccounts is derived fresh each render from okAccounts/blendedCurrency; data + grandTotals cover its inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, grandTotals]);
+
+  const campaignRows: CampaignRow[] = useMemo(
+    () =>
+      (data?.accounts ?? [])
+        .filter((a) => !a.error)
+        .flatMap((a) =>
+          a.campaigns.map((c) => ({ ...c, accountId: a.id, accountName: a.name ?? `Account ${a.id}` }))
+        ),
+    [data]
+  );
+
+  const sortedRows = useMemo(() => {
+    const rows = [...campaignRows];
+    const { key, dir } = sort;
+    rows.sort((a, b) => {
+      const av = a[key];
+      const bv = b[key];
+      let cmp: number;
+      if (typeof av === "string" || typeof bv === "string") {
+        cmp = String(av ?? "").localeCompare(String(bv ?? ""));
+      } else {
+        cmp = (av ?? -Infinity) === (bv ?? -Infinity) ? 0 : (av ?? -Infinity) < (bv ?? -Infinity) ? -1 : 1;
+      }
+      return dir === "asc" ? cmp : -cmp;
+    });
+    return rows;
+  }, [campaignRows, sort]);
+
+  function toggleSort(key: SortKey) {
+    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }));
+  }
+
+  const currencyForColumn = blendedCurrency ?? "USD";
+  const showAccountColumn = accounts.length > 1;
 
   return (
-    <div className="w-full max-w-5xl mx-auto flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium">
-            {accounts.length > 0
-              ? `${accounts.length} account${accounts.length === 1 ? "" : "s"} in your MCC`
-              : "Budget tracking"}
-          </p>
-          {data && (
-            <p className="text-xs text-black/50 dark:text-white/50">
-              Day {data.dayOfMonth} of {data.daysInMonth} this month · updated{" "}
-              {new Date(data.asOf).toLocaleTimeString()}
-            </p>
-          )}
-        </div>
+        <p className="text-xs text-(--text-muted)">
+          {accounts.length > 0
+            ? `${accounts.length} account${accounts.length === 1 ? "" : "s"} in your MCC`
+            : loading
+              ? "Loading accounts…"
+              : "No accounts found"}
+          {data && ` · Day ${data.dayOfMonth} of ${data.daysInMonth} this month · updated ${new Date(data.asOf).toLocaleTimeString()}`}
+        </p>
         <button
           type="button"
           onClick={load}
@@ -153,28 +213,48 @@ export default function BudgetTrackingTool() {
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {accounts.some((a) => a.error) && (
+        <p className="text-xs text-(--status-serious)">
+          {accounts.filter((a) => a.error).length} account{accounts.filter((a) => a.error).length === 1 ? "" : "s"} failed
+          to load and {accounts.filter((a) => a.error).length === 1 ? "is" : "are"} excluded from the totals below.
+        </p>
+      )}
+      {okAccounts.length > 1 && !blendedCurrency && (
+        <p className="text-xs text-(--text-muted)">
+          Accounts use different currencies, so the totals and chart below only cover a single-currency
+          subset when one exists — otherwise per-campaign figures in the table are still exact.
+        </p>
+      )}
 
       {grandTotals && blendedCurrency && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard label="Daily budget" value={formatBidMicros(grandTotals.dailyBudgetMicros, blendedCurrency)} />
           <StatCard
+            icon={IconWallet}
+            label="Daily budget"
+            value={formatBidMicros(grandTotals.dailyBudgetMicros, blendedCurrency)}
+          />
+          <StatCard
+            icon={IconTarget}
             label="Spent today"
             value={formatBidMicros(grandTotals.todaySpendMicros, blendedCurrency)}
-            sub={
+            pill={
               grandTotals.dailyBudgetMicros > 0
                 ? `${Math.round((grandTotals.todaySpendMicros / grandTotals.dailyBudgetMicros) * 100)}% of daily budget`
                 : undefined
             }
           />
           <StatCard
+            icon={IconCalendar}
             label="Spent month-to-date"
             value={formatBidMicros(grandTotals.mtdSpendMicros, blendedCurrency)}
-            sub={grandPacing !== null ? `${Math.round(grandPacing)}% of pace` : undefined}
+            pill={grandPacing !== null ? `${Math.round(grandPacing)}% of pace` : undefined}
+            pillClassName={grandStatus.className}
           />
           <StatCard
+            icon={IconTrendingUp}
             label="Projected month total"
             value={formatBidMicros(grandTotals.projectedMonthSpendMicros, blendedCurrency)}
-            sub={
+            pill={
               grandTotals.monthlyBudgetTargetMicros > 0
                 ? `vs ${formatBidMicros(grandTotals.monthlyBudgetTargetMicros, blendedCurrency)} budget`
                 : undefined
@@ -182,167 +262,125 @@ export default function BudgetTrackingTool() {
           />
         </div>
       )}
-      {okAccounts.length > 1 && !blendedCurrency && (
-        <p className="text-xs text-black/50 dark:text-white/50">
-          Accounts use different currencies, so totals are shown per account below rather than blended.
-        </p>
+
+      {chartPoints.length > 1 && (
+        <div className="rounded-xl border border-black/10 dark:border-white/15 bg-(--surface-1) p-5">
+          <p className="text-sm font-medium mb-1">Analytics</p>
+          <p className="text-xs text-(--text-muted) mb-4">Cumulative spend this month vs. an even budget pace</p>
+          <SpendPacingChart points={chartPoints} currency={blendedCurrency ?? "USD"} />
+        </div>
       )}
 
-      <div className="flex flex-col gap-3">
-        {loading && !data && (
-          <p className="text-sm text-black/50 dark:text-white/50">Loading account budgets…</p>
+      <div className="rounded-xl border border-black/10 dark:border-white/15 bg-(--surface-1) overflow-hidden">
+        <p className="text-sm font-medium px-5 pt-4 pb-3">Campaigns</p>
+        {loading && !data && <p className="text-sm text-(--text-muted) px-5 pb-4">Loading campaign budgets…</p>}
+        {data && campaignRows.length === 0 && (
+          <p className="text-sm text-(--text-muted) px-5 pb-4">No active or paused campaigns found.</p>
         )}
-        {data && accounts.length === 0 && (
-          <p className="text-sm text-black/50 dark:text-white/50">
-            No enabled client accounts found under this MCC.
-          </p>
-        )}
-        {accounts.map((account) => (
-          <AccountSection key={account.id} account={account} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function AccountSection({ account }: { account: AccountBudget }) {
-  const totals = sumTotals(account.campaigns);
-  const currency = account.currencyCode;
-  const pacing = mtdPacingPercent(totals);
-  const status = pacingStatus(pacing);
-
-  return (
-    <details className="group rounded-xl border border-black/10 dark:border-white/15 open:pb-4">
-      <summary className="flex items-center justify-between gap-4 cursor-pointer list-none px-4 py-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-black/30 dark:text-white/30 transition-transform group-open:rotate-90">▸</span>
-          <div className="min-w-0">
-            <p className="text-sm font-medium truncate">{account.name ?? `Account ${account.id}`}</p>
-            <p className="text-xs text-black/50 dark:text-white/50">
-              {account.id} · {account.campaigns.length} campaign{account.campaigns.length === 1 ? "" : "s"} ·{" "}
-              {currency}
-            </p>
+        {campaignRows.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-t border-b border-black/10 dark:border-white/10 text-left text-xs text-(--text-muted)">
+                  <SortableHeader label="Campaign" sortKey="name" sort={sort} onClick={toggleSort} />
+                  {showAccountColumn && <SortableHeader label="Account" sortKey="accountName" sort={sort} onClick={toggleSort} />}
+                  <th className="px-4 py-2.5 font-medium">Status</th>
+                  <SortableHeader label="Daily budget" sortKey="dailyBudgetMicros" sort={sort} onClick={toggleSort} align="right" />
+                  <SortableHeader label="Spent today" sortKey="todaySpendMicros" sort={sort} onClick={toggleSort} align="right" />
+                  <SortableHeader label="Spent MTD" sortKey="mtdSpendMicros" sort={sort} onClick={toggleSort} align="right" />
+                  <SortableHeader label="Pacing" sortKey="mtdPacingPercent" sort={sort} onClick={toggleSort} />
+                </tr>
+              </thead>
+              <tbody className="[font-variant-numeric:tabular-nums]">
+                {sortedRows.map((c) => {
+                  const status = pacingStatus(c.mtdPacingPercent);
+                  const currency = blendedCurrency ?? currencyForColumn;
+                  return (
+                    <tr key={`${c.accountId}-${c.id}`} className="border-b border-black/5 dark:border-white/10 last:border-0">
+                      <td className="px-4 py-2.5 font-medium max-w-[220px] truncate">{c.name}</td>
+                      {showAccountColumn && (
+                        <td className="px-4 py-2.5 text-(--text-secondary) max-w-[160px] truncate">{c.accountName}</td>
+                      )}
+                      <td className="px-4 py-2.5 text-(--text-secondary)">{STATUS_LABELS[c.status] ?? c.status}</td>
+                      <td className="px-4 py-2.5 text-right">{formatBidMicros(c.dailyBudgetMicros, currency)}</td>
+                      <td className="px-4 py-2.5 text-right">{formatBidMicros(c.todaySpendMicros, currency)}</td>
+                      <td className="px-4 py-2.5 text-right">{formatBidMicros(c.mtdSpendMicros, currency)}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>
+                          {status.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        </div>
-        {account.error ? (
-          <span className="inline-block shrink-0 rounded-full px-2 py-0.5 text-xs font-medium text-red-600 bg-red-50">
-            Failed to load
-          </span>
-        ) : (
-          <span className={`inline-block shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>
-            {status.label}
-          </span>
         )}
-      </summary>
-
-      <div className="flex flex-col gap-3 px-4">
-        {account.error && <p className="text-sm text-red-600">{account.error}</p>}
-
-        {!account.error && account.campaigns.length === 0 && (
-          <p className="text-sm text-black/50 dark:text-white/50">
-            No active or paused campaigns on this account.
-          </p>
-        )}
-
-        {!account.error && account.campaigns.length > 0 && (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <StatCard label="Daily budget" value={formatBidMicros(totals.dailyBudgetMicros, currency)} />
-              <StatCard label="Spent today" value={formatBidMicros(totals.todaySpendMicros, currency)} />
-              <StatCard label="Spent MTD" value={formatBidMicros(totals.mtdSpendMicros, currency)} />
-              <StatCard
-                label="Projected month total"
-                value={formatBidMicros(totals.projectedMonthSpendMicros, currency)}
-              />
-            </div>
-
-            <div className="flex flex-col gap-3">
-              {account.campaigns.map((c) => (
-                <CampaignCard key={c.id} campaign={c} currency={currency} />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </details>
-  );
-}
-
-function CampaignCard({ campaign: c, currency }: { campaign: CampaignBudget; currency: string }) {
-  const mtdStatus = pacingStatus(c.mtdPacingPercent);
-  return (
-    <div className="rounded-lg border border-black/10 dark:border-white/15 p-3 flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium">{c.name}</p>
-          <p className="text-xs text-black/50 dark:text-white/50">
-            {STATUS_LABELS[c.status] ?? c.status} · {formatBidMicros(c.dailyBudgetMicros, currency)}/day
-            {c.budgetPeriod !== "DAILY" ? ` (${c.budgetPeriod.toLowerCase()} budget)` : ""}
-          </p>
-        </div>
-        <span
-          className={`inline-block shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${mtdStatus.className}`}
-        >
-          {mtdStatus.label}
-        </span>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <PacingBar
-          label="Today"
-          spendMicros={c.todaySpendMicros}
-          targetMicros={c.dailyBudgetMicros}
-          percent={c.todayPacingPercent}
-          currency={currency}
-        />
-        <PacingBar
-          label="Month-to-date"
-          spendMicros={c.mtdSpendMicros}
-          targetMicros={c.expectedMtdBudgetMicros}
-          percent={c.mtdPacingPercent}
-          currency={currency}
-        />
       </div>
     </div>
   );
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-xl border border-black/10 dark:border-white/15 p-4 flex flex-col gap-1">
-      <span className="text-xs text-black/50 dark:text-white/50">{label}</span>
-      <span className="text-lg font-semibold">{value}</span>
-      {sub && <span className="text-xs text-black/50 dark:text-white/50">{sub}</span>}
-    </div>
-  );
-}
-
-function PacingBar({
+function SortableHeader({
   label,
-  spendMicros,
-  targetMicros,
-  percent,
-  currency,
+  sortKey,
+  sort,
+  onClick,
+  align,
 }: {
   label: string;
-  spendMicros: number;
-  targetMicros: number;
-  percent: number | null;
-  currency: string;
+  sortKey: SortKey;
+  sort: { key: SortKey; dir: "asc" | "desc" };
+  onClick: (key: SortKey) => void;
+  align?: "right";
 }) {
-  const width = percent === null ? 0 : Math.min(100, Math.max(0, percent));
+  const isActive = sort.key === sortKey;
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-black/60 dark:text-white/60">{label}</span>
-        <span className="font-medium">
-          {formatBidMicros(spendMicros, currency)}
-          {targetMicros > 0 ? ` / ${formatBidMicros(targetMicros, currency)}` : ""}
+    <th className={`px-4 py-2.5 font-medium ${align === "right" ? "text-right" : "text-left"}`}>
+      <button
+        type="button"
+        onClick={() => onClick(sortKey)}
+        className={`inline-flex items-center gap-1 hover:text-(--text-primary) transition-colors ${
+          align === "right" ? "flex-row-reverse" : ""
+        } ${isActive ? "text-(--text-primary)" : ""}`}
+      >
+        {label}
+        <span className="text-[10px]">{isActive ? (sort.dir === "asc" ? "▲" : "▼") : ""}</span>
+      </button>
+    </th>
+  );
+}
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  pill,
+  pillClassName,
+}: {
+  icon: (props: { className?: string }) => ReactElement;
+  label: string;
+  value: string;
+  pill?: string;
+  pillClassName?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-black/10 dark:border-white/15 bg-(--surface-1) p-4 flex flex-col gap-2.5">
+      <div className="flex items-center gap-2 text-(--text-muted)">
+        <Icon className="h-4 w-4" />
+        <span className="text-xs">{label}</span>
+      </div>
+      <span className="text-xl font-semibold">{value}</span>
+      {pill && (
+        <span
+          className={`self-start rounded-full px-2 py-0.5 text-[11px] font-medium ${
+            pillClassName ?? "text-(--text-secondary) bg-black/5 dark:bg-white/10"
+          }`}
+        >
+          {pill}
         </span>
-      </div>
-      <div className="h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-        <div className={`h-full rounded-full transition-all ${barColor(percent)}`} style={{ width: `${width}%` }} />
-      </div>
+      )}
     </div>
   );
 }

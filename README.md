@@ -8,10 +8,11 @@ both backed live by the real Google Ads API (`KeywordPlanIdeaService`):
 - **Get search volume and forecasts** — enter keywords you already have to get their exact
   historical search volume/competition, plus a campaign forecast (clicks, cost, conversions,
   avg. CPC/CPA) for a given bid, budget, and date range.
-- **Budget tracking** — a live pacing dashboard across every account in your MCC: today's
-  spend vs. daily budget and month-to-date spend vs. expected-to-date budget, per campaign,
-  totaled per account, and blended into an MCC-wide total (when accounts share a currency),
-  with a projected month-end spend and an under/on-pace/over-pace status throughout.
+- **Budget tracking** — a live pacing dashboard across every account in your MCC: stat cards
+  for daily budget, today's spend, month-to-date spend, and projected month-end spend (blended
+  across accounts when they share a currency); a chart of cumulative spend this month against
+  an even budget pace; and a sortable table of every campaign's budget, spend, and
+  under/on-pace/over-pace status.
 
 ## Setup
 
@@ -79,18 +80,21 @@ Open [http://localhost:3000](http://localhost:3000).
 - `src/app/api/budget-tracking/route.ts` first queries `customer_client` on your MCC
   (`GOOGLE_ADS_LOGIN_CUSTOMER_ID`) to list every enabled, non-manager account underneath it —
   this resource returns the full hierarchy in one call, including grandchild accounts under
-  sub-MCCs. For each account (5 at a time, to stay within rate limits) it then runs three
-  GAQL queries against the `campaign` resource: current budget, today's cost, and
-  month-to-date cost. It computes an expected-to-date budget (daily budget × days elapsed
-  this month) and a projected month-end spend (month-to-date spend annualized to the full
-  month) per campaign. A failure on one account is captured per-account rather than failing
-  the whole request.
-- `src/components/BudgetTrackingTool.tsx` is the client UI: an MCC-wide totals row (blended
-  only when every account shares a currency), then a collapsible section per account with its
-  own totals and a card per campaign showing today/month-to-date pacing bars and an
-  under/on-pace/over-pace badge.
-- `src/components/AdsEstimatorTabs.tsx` switches between the three tools, mirroring Keyword
-  Planner's own tabs.
+  sub-MCCs. For each account (5 at a time, to stay within rate limits) it then runs four GAQL
+  queries: current budget/today's cost/month-to-date cost per campaign, plus one daily-cost
+  series for the account (`FROM customer`, grouped by `segments.date`) for the chart. It
+  computes an expected-to-date budget (daily budget × days elapsed this month) and a projected
+  month-end spend (month-to-date spend annualized to the full month) per campaign. A failure on
+  one account is captured per-account rather than failing the whole request.
+- `src/components/BudgetTrackingTool.tsx` is the client UI: blended MCC-wide stat cards (when
+  every account shares a currency), the `SpendPacingChart`, and a sortable table flattening
+  every account's campaigns with a pacing badge per row.
+- `src/components/dashboard/SpendPacingChart.tsx` is a dependency-free inline-SVG line chart
+  (cumulative actual spend vs. a dashed cumulative budget-pace line) with a hover crosshair and
+  tooltip, built to the house dataviz conventions (see the `dataviz` skill) rather than a
+  charting library.
+- `src/components/dashboard/DashboardShell.tsx` is the sidebar + header shell all three tools
+  render inside, replacing the old horizontal tab bar.
 - `src/lib/constants.ts` has a curated shortlist of common Google Ads
   [geo target constants](https://developers.google.com/google-ads/api/data/geotargets) and
   language constants for the location/language selectors. Add more IDs from that reference
@@ -111,6 +115,9 @@ Open [http://localhost:3000](http://localhost:3000).
   budget with another campaign will each show that budget's full amount rather than a
   per-campaign split.
 - Budget tracking queries every enabled client account under the MCC with no filtering or
-  pagination — a large MCC means a large number of API calls on every refresh (3 per account,
+  pagination — a large MCC means a large number of API calls on every refresh (4 per account,
   plus 1 for the account list), which can be slow and adds up against your developer token's
   quota.
+- The stat cards and chart only render when every account shares a currency (a blended total
+  across currencies wouldn't mean anything); the campaigns table always shows exact per-row
+  figures regardless.
