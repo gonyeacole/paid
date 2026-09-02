@@ -411,7 +411,7 @@ function AccountRowGroup({
           </span>
         </td>
         <td className="px-4 py-3 text-right">
-          {formatBidMicros(account.totals.expectedMtdBudgetMicros, account.currencyCode)}
+          {formatBidMicros(account.totals.monthlyBudgetTargetMicros, account.currencyCode)}
         </td>
         <td className="px-4 py-3">
           <BudgetProgressCell
@@ -439,7 +439,7 @@ function AccountRowGroup({
                 )}
               </td>
               <td className="px-4 py-2.5 text-right text-(--text-secondary)">
-                {formatBidMicros(c.expectedMtdBudgetMicros, account.currencyCode)}
+                {formatBidMicros(c.monthlyBudgetTargetMicros, account.currencyCode)}
               </td>
               <td className="px-4 py-2.5">
                 <BudgetProgressCell
