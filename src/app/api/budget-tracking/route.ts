@@ -20,17 +20,27 @@ type CampaignQueryRow = {
   campaign_budget?: { amount_micros?: string | number | null; period?: string | null };
 };
 
-type MetricsQueryRow = {
+type TodayMetricsQueryRow = {
   campaign?: { id?: string | number | null };
   metrics?: { cost_micros?: string | number | null };
 };
 
-type DailyMetricsRow = {
-  segments?: { date?: string | null };
-  metrics?: { cost_micros?: string | number | null };
+type MtdMetricsQueryRow = {
+  campaign?: { id?: string | number | null };
+  metrics?: {
+    cost_micros?: string | number | null;
+    clicks?: string | number | null;
+    conversions?: string | number | null;
+  };
 };
 
 function toMicros(value: string | number | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  const n = typeof value === "string" ? Number(value) : value;
+  return Number.isFinite(n) ? n : 0;
+}
+
+function toNumber(value: string | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
   const n = typeof value === "string" ? Number(value) : value;
   return Number.isFinite(n) ? n : 0;
@@ -56,7 +66,7 @@ async function mapWithConcurrency<T, R>(
 async function fetchAccountBudget(customerId: string, dayOfMonth: number, daysInMonth: number) {
   const customer = getGoogleAdsChildCustomer(customerId);
 
-  const [campaignRows, todayRows, mtdRows, dailyRows] = await Promise.all([
+  const [campaignRows, todayRows, mtdRows] = await Promise.all([
     customer.query<CampaignQueryRow[]>(`
       SELECT
         campaign.id,
@@ -68,21 +78,15 @@ async function fetchAccountBudget(customerId: string, dayOfMonth: number, daysIn
       WHERE campaign.status IN ('ENABLED', 'PAUSED')
       ORDER BY campaign.name
     `),
-    customer.query<MetricsQueryRow[]>(`
+    customer.query<TodayMetricsQueryRow[]>(`
       SELECT campaign.id, metrics.cost_micros
       FROM campaign
       WHERE segments.date DURING TODAY
     `),
-    customer.query<MetricsQueryRow[]>(`
-      SELECT campaign.id, metrics.cost_micros
+    customer.query<MtdMetricsQueryRow[]>(`
+      SELECT campaign.id, metrics.cost_micros, metrics.clicks, metrics.conversions
       FROM campaign
       WHERE segments.date DURING THIS_MONTH
-    `),
-    customer.query<DailyMetricsRow[]>(`
-      SELECT segments.date, metrics.cost_micros
-      FROM customer
-      WHERE segments.date DURING THIS_MONTH
-      ORDER BY segments.date
     `),
   ]);
 
@@ -98,6 +102,8 @@ async function fetchAccountBudget(customerId: string, dayOfMonth: number, daysIn
   }
 
   const mtdSpendByCampaign = new Map<string, number>();
+  const mtdClicksByCampaign = new Map<string, number>();
+  const mtdConversionsByCampaign = new Map<string, number>();
   for (const row of mtdRows) {
     const id = row.campaign?.id;
     if (id == null) continue;
@@ -105,6 +111,11 @@ async function fetchAccountBudget(customerId: string, dayOfMonth: number, daysIn
     mtdSpendByCampaign.set(
       key,
       (mtdSpendByCampaign.get(key) ?? 0) + toMicros(row.metrics?.cost_micros)
+    );
+    mtdClicksByCampaign.set(key, (mtdClicksByCampaign.get(key) ?? 0) + toNumber(row.metrics?.clicks));
+    mtdConversionsByCampaign.set(
+      key,
+      (mtdConversionsByCampaign.get(key) ?? 0) + toNumber(row.metrics?.conversions)
     );
   }
 
@@ -115,6 +126,8 @@ async function fetchAccountBudget(customerId: string, dayOfMonth: number, daysIn
       const dailyBudgetMicros = toMicros(row.campaign_budget?.amount_micros);
       const todaySpendMicros = todaySpendByCampaign.get(id) ?? 0;
       const mtdSpendMicros = mtdSpendByCampaign.get(id) ?? 0;
+      const mtdClicks = mtdClicksByCampaign.get(id) ?? 0;
+      const mtdConversions = mtdConversionsByCampaign.get(id) ?? 0;
       const expectedMtdBudgetMicros = dailyBudgetMicros * dayOfMonth;
       const monthlyBudgetTargetMicros = dailyBudgetMicros * daysInMonth;
       const projectedMonthSpendMicros =
@@ -128,6 +141,8 @@ async function fetchAccountBudget(customerId: string, dayOfMonth: number, daysIn
         dailyBudgetMicros,
         todaySpendMicros,
         mtdSpendMicros,
+        mtdClicks,
+        mtdConversions,
         expectedMtdBudgetMicros,
         monthlyBudgetTargetMicros,
         projectedMonthSpendMicros,
@@ -138,20 +153,7 @@ async function fetchAccountBudget(customerId: string, dayOfMonth: number, daysIn
       };
     });
 
-  const spendByDay = new Map<number, number>();
-  for (const row of dailyRows) {
-    const dateStr = row.segments?.date;
-    if (!dateStr) continue;
-    const day = Number(dateStr.slice(-2));
-    if (!Number.isFinite(day)) continue;
-    spendByDay.set(day, (spendByDay.get(day) ?? 0) + toMicros(row.metrics?.cost_micros));
-  }
-  const dailySpend = Array.from({ length: dayOfMonth }, (_, i) => {
-    const day = i + 1;
-    return { day, spendMicros: spendByDay.get(day) ?? 0 };
-  });
-
-  return { campaigns, dailySpend };
+  return { campaigns };
 }
 
 export async function GET() {
@@ -185,12 +187,12 @@ export async function GET() {
 
     const accounts = await mapWithConcurrency(childAccounts, ACCOUNT_CONCURRENCY, async (account) => {
       try {
-        const { campaigns, dailySpend } = await fetchAccountBudget(account.id, dayOfMonth, daysInMonth);
-        return { ...account, campaigns, dailySpend, error: null as string | null };
+        const { campaigns } = await fetchAccountBudget(account.id, dayOfMonth, daysInMonth);
+        return { ...account, campaigns, error: null as string | null };
       } catch (error) {
         console.error(`Google Ads budget tracking request failed for account ${account.id}`, error);
         const message = error instanceof Error ? error.message : "Unknown error";
-        return { ...account, campaigns: [], dailySpend: [], error: message };
+        return { ...account, campaigns: [], error: message };
       }
     });
 

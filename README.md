@@ -8,11 +8,13 @@ both backed live by the real Google Ads API (`KeywordPlanIdeaService`):
 - **Get search volume and forecasts** — enter keywords you already have to get their exact
   historical search volume/competition, plus a campaign forecast (clicks, cost, conversions,
   avg. CPC/CPA) for a given bid, budget, and date range.
-- **Budget tracking** — a live pacing dashboard across every account in your MCC: stat cards
-  for daily budget, today's spend, month-to-date spend, and projected month-end spend (blended
-  across accounts when they share a currency); a chart of cumulative spend this month against
-  an even budget pace; and a sortable table of every campaign's budget, spend, and
-  under/on-pace/over-pace status.
+- **Paid Dashboards** — two sub-tabs backed by every account in your MCC:
+  - *Budget Pacing* — stat cards for daily budget, today's spend, month-to-date spend, and
+    projected month-end spend (blended across accounts when they share a currency), plus a
+    sortable, expandable table of every account (and, expanded, its campaigns) showing budget
+    target, budget consumed so far, spend, and pacing.
+  - *Analytics* — a sortable per-client table: cost per click, spend, conversion rate,
+    conversions, and cost per conversion, month-to-date.
 
 ## Setup
 
@@ -40,7 +42,7 @@ You need five values, all from Google:
    you through this — the result is a long-lived refresh token.
 4. **Customer ID** — The 10-digit Google Ads account ID to query, no dashes.
 5. **Login customer ID** — required if `Customer ID` is a client account under a manager/MCC
-   account (the manager's 10-digit ID). Also required for budget tracking, where it must be
+   account (the manager's 10-digit ID). Also required for Paid Dashboards, where it must be
    your **MCC's own** 10-digit ID (not a sub-account) — that's the account the tool queries
    to list every account underneath it.
 
@@ -80,19 +82,17 @@ Open [http://localhost:3000](http://localhost:3000).
 - `src/app/api/budget-tracking/route.ts` first queries `customer_client` on your MCC
   (`GOOGLE_ADS_LOGIN_CUSTOMER_ID`) to list every enabled, non-manager account underneath it —
   this resource returns the full hierarchy in one call, including grandchild accounts under
-  sub-MCCs. For each account (5 at a time, to stay within rate limits) it then runs four GAQL
-  queries: current budget/today's cost/month-to-date cost per campaign, plus one daily-cost
-  series for the account (`FROM customer`, grouped by `segments.date`) for the chart. It
-  computes an expected-to-date budget (daily budget × days elapsed this month) and a projected
-  month-end spend (month-to-date spend annualized to the full month) per campaign. A failure on
-  one account is captured per-account rather than failing the whole request.
-- `src/components/BudgetTrackingTool.tsx` is the client UI: blended MCC-wide stat cards (when
-  every account shares a currency), the `SpendPacingChart`, and a sortable table flattening
-  every account's campaigns with a pacing badge per row.
-- `src/components/dashboard/SpendPacingChart.tsx` is a dependency-free inline-SVG line chart
-  (cumulative actual spend vs. a dashed cumulative budget-pace line) with a hover crosshair and
-  tooltip, built to the house dataviz conventions (see the `dataviz` skill) rather than a
-  charting library.
+  sub-MCCs. For each account (5 at a time, to stay within rate limits) it then runs three GAQL
+  queries against `campaign`: current budget, today's cost, and month-to-date cost/clicks/
+  conversions. It computes an expected-to-date budget (daily budget × days elapsed this month)
+  and a projected month-end spend (month-to-date spend annualized to the full month) per
+  campaign. A failure on one account is captured per-account rather than failing the whole
+  request.
+- `src/components/BudgetTrackingTool.tsx` is the client UI, split into two sub-tabs: Budget
+  Pacing (blended MCC-wide stat cards plus a sortable, expandable table — one row per account,
+  expanding to its campaigns — with a budget-consumed progress bar and a pacing percentage) and
+  Analytics (a sortable table of cost per click, spend, conversion rate, conversions, and cost
+  per conversion, one row per account).
 - `src/components/dashboard/DashboardShell.tsx` is the sidebar + header shell all three tools
   render inside, replacing the old horizontal tab bar.
 - `src/lib/constants.ts` has a curated shortlist of common Google Ads
@@ -110,14 +110,16 @@ Open [http://localhost:3000](http://localhost:3000).
   a simplification of Keyword Planner's per-keyword match type control.
 - Google Ads API forecast periods must be in the future and are capped at a limited window
   (currently up to 90 days); an out-of-range date range returns an API error.
-- Budget tracking treats "today" and "this month" using the server's UTC clock, which may be
+- Paid Dashboards treats "today" and "this month" using the server's UTC clock, which may be
   off by a few hours from each account's own timezone near midnight. Campaigns that share a
   budget with another campaign will each show that budget's full amount rather than a
   per-campaign split.
-- Budget tracking queries every enabled client account under the MCC with no filtering or
-  pagination — a large MCC means a large number of API calls on every refresh (4 per account,
+- Paid Dashboards queries every enabled client account under the MCC with no filtering or
+  pagination — a large MCC means a large number of API calls on every refresh (3 per account,
   plus 1 for the account list), which can be slow and adds up against your developer token's
   quota.
-- The stat cards and chart only render when every account shares a currency (a blended total
-  across currencies wouldn't mean anything); the campaigns table always shows exact per-row
+- The Budget Pacing stat cards only render when every account shares a currency (a blended
+  total across currencies wouldn't mean anything); both tables always show exact per-row
   figures regardless.
+- Conversion rate and cost per conversion are `null`/`—` for a client with zero clicks or zero
+  conversions this month, rather than showing a divide-by-zero artifact.

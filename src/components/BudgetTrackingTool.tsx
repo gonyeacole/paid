@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { formatBidMicros } from "@/lib/format";
-import SpendPacingChart, { type SpendPacingPoint } from "@/components/dashboard/SpendPacingChart";
 import { IconWallet, IconTarget, IconCalendar, IconTrendingUp } from "@/components/dashboard/icons";
 
 type CampaignBudget = {
@@ -13,6 +12,8 @@ type CampaignBudget = {
   dailyBudgetMicros: number;
   todaySpendMicros: number;
   mtdSpendMicros: number;
+  mtdClicks: number;
+  mtdConversions: number;
   expectedMtdBudgetMicros: number;
   monthlyBudgetTargetMicros: number;
   projectedMonthSpendMicros: number;
@@ -25,7 +26,6 @@ type AccountBudget = {
   name: string | null;
   currencyCode: string;
   campaigns: CampaignBudget[];
-  dailySpend: { day: number; spendMicros: number }[];
   error: string | null;
 };
 
@@ -40,6 +40,8 @@ type Totals = {
   dailyBudgetMicros: number;
   todaySpendMicros: number;
   mtdSpendMicros: number;
+  mtdClicks: number;
+  mtdConversions: number;
   expectedMtdBudgetMicros: number;
   monthlyBudgetTargetMicros: number;
   projectedMonthSpendMicros: number;
@@ -53,9 +55,19 @@ type AccountRow = {
   totals: Totals;
   pacingPercent: number | null;
   consumptionPercent: number | null;
+  costPerClickMicros: number | null;
+  conversionRatePercent: number | null;
+  costPerConversionMicros: number | null;
 };
 
-type AccountSortKey = "name" | "consumptionPercent" | "pacingPercent";
+type PacingSortKey = "name" | "consumptionPercent" | "pacingPercent";
+type AnalyticsSortKey =
+  | "name"
+  | "costPerClickMicros"
+  | "mtdSpendMicros"
+  | "conversionRatePercent"
+  | "mtdConversions"
+  | "costPerConversionMicros";
 
 const STATUS_LABELS: Record<string, string> = {
   ENABLED: "Active",
@@ -68,6 +80,8 @@ function sumTotals(campaigns: CampaignBudget[]): Totals {
       acc.dailyBudgetMicros += c.dailyBudgetMicros;
       acc.todaySpendMicros += c.todaySpendMicros;
       acc.mtdSpendMicros += c.mtdSpendMicros;
+      acc.mtdClicks += c.mtdClicks;
+      acc.mtdConversions += c.mtdConversions;
       acc.expectedMtdBudgetMicros += c.expectedMtdBudgetMicros;
       acc.projectedMonthSpendMicros += c.projectedMonthSpendMicros;
       acc.monthlyBudgetTargetMicros += c.monthlyBudgetTargetMicros;
@@ -77,11 +91,21 @@ function sumTotals(campaigns: CampaignBudget[]): Totals {
       dailyBudgetMicros: 0,
       todaySpendMicros: 0,
       mtdSpendMicros: 0,
+      mtdClicks: 0,
+      mtdConversions: 0,
       expectedMtdBudgetMicros: 0,
       projectedMonthSpendMicros: 0,
       monthlyBudgetTargetMicros: 0,
     }
   );
+}
+
+function formatConversions(value: number): string {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value);
+}
+
+function formatPercent(value: number | null, decimals = 2): string {
+  return value === null ? "—" : `${value.toFixed(decimals)}%`;
 }
 
 function mtdPacingPercent(totals: Totals): number | null {
@@ -116,7 +140,11 @@ export default function BudgetTrackingTool() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<SubTabId>("pacing");
-  const [sort, setSort] = useState<{ key: AccountSortKey; dir: "asc" | "desc" }>({
+  const [pacingSort, setPacingSort] = useState<{ key: PacingSortKey; dir: "asc" | "desc" }>({
+    key: "name",
+    dir: "asc",
+  });
+  const [analyticsSort, setAnalyticsSort] = useState<{ key: AnalyticsSortKey; dir: "asc" | "desc" }>({
     key: "name",
     dir: "asc",
   });
@@ -154,33 +182,6 @@ export default function BudgetTrackingTool() {
   const grandPacing = grandTotals ? mtdPacingPercent(grandTotals) : null;
   const grandStatus = pacingStatus(grandPacing);
 
-  const chartPoints: SpendPacingPoint[] = useMemo(() => {
-    if (!data || !grandTotals || blendedAccounts.length === 0) return [];
-    const dailyActualByDay = new Map<number, number>();
-    for (const account of blendedAccounts) {
-      for (const { day, spendMicros } of account.dailySpend) {
-        dailyActualByDay.set(day, (dailyActualByDay.get(day) ?? 0) + spendMicros);
-      }
-    }
-    const monthName = new Date(data.asOf).toLocaleString("en-US", { month: "short" });
-    let cumulativeActual = 0;
-    const points: SpendPacingPoint[] = [];
-    for (let day = 1; day <= data.daysInMonth; day++) {
-      if (day <= data.dayOfMonth) {
-        cumulativeActual += dailyActualByDay.get(day) ?? 0;
-      }
-      points.push({
-        day,
-        label: `${monthName} ${day}`,
-        actualCumulativeMicros: day <= data.dayOfMonth ? cumulativeActual : null,
-        budgetCumulativeMicros: grandTotals.dailyBudgetMicros * day,
-      });
-    }
-    return points;
-    // blendedAccounts is derived fresh each render from okAccounts/blendedCurrency; data + grandTotals cover its inputs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, grandTotals]);
-
   const accountRows: AccountRow[] = useMemo(
     () =>
       (data?.accounts ?? [])
@@ -192,6 +193,11 @@ export default function BudgetTrackingTool() {
             totals.monthlyBudgetTargetMicros > 0
               ? (totals.mtdSpendMicros / totals.monthlyBudgetTargetMicros) * 100
               : null;
+          const costPerClickMicros = totals.mtdClicks > 0 ? totals.mtdSpendMicros / totals.mtdClicks : null;
+          const conversionRatePercent =
+            totals.mtdClicks > 0 ? (totals.mtdConversions / totals.mtdClicks) * 100 : null;
+          const costPerConversionMicros =
+            totals.mtdConversions > 0 ? totals.mtdSpendMicros / totals.mtdConversions : null;
           return {
             id: a.id,
             name: a.name ?? `Account ${a.id}`,
@@ -200,30 +206,46 @@ export default function BudgetTrackingTool() {
             totals,
             pacingPercent,
             consumptionPercent,
+            costPerClickMicros,
+            conversionRatePercent,
+            costPerConversionMicros,
           };
         }),
     [data]
   );
 
-  const sortedAccountRows = useMemo(() => {
-    const rows = [...accountRows];
+  function sortRows<K extends string>(rows: AccountRow[], sort: { key: K; dir: "asc" | "desc" }): AccountRow[] {
+    const sorted = [...rows];
     const { key, dir } = sort;
-    rows.sort((a, b) => {
-      const av = a[key];
-      const bv = b[key];
+    sorted.sort((a, b) => {
+      const av = a[key as keyof AccountRow];
+      const bv = b[key as keyof AccountRow];
       let cmp: number;
       if (typeof av === "string" || typeof bv === "string") {
         cmp = String(av ?? "").localeCompare(String(bv ?? ""));
       } else {
-        cmp = (av ?? -Infinity) === (bv ?? -Infinity) ? 0 : (av ?? -Infinity) < (bv ?? -Infinity) ? -1 : 1;
+        const an = (av as number | null) ?? -Infinity;
+        const bn = (bv as number | null) ?? -Infinity;
+        cmp = an === bn ? 0 : an < bn ? -1 : 1;
       }
       return dir === "asc" ? cmp : -cmp;
     });
-    return rows;
-  }, [accountRows, sort]);
+    return sorted;
+  }
 
-  function toggleSort(key: AccountSortKey) {
-    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }));
+  const sortedAccountRows = useMemo(() => sortRows(accountRows, pacingSort), [accountRows, pacingSort]);
+  const sortedAnalyticsRows = useMemo(() => sortRows(accountRows, analyticsSort), [accountRows, analyticsSort]);
+
+  function togglePacingSort(key: PacingSortKey) {
+    setPacingSort((prev) =>
+      prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }
+    );
+  }
+
+  function toggleAnalyticsSort(key: AnalyticsSortKey) {
+    setAnalyticsSort((prev) =>
+      prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }
+    );
   }
 
   function toggleExpanded(id: string) {
@@ -265,8 +287,8 @@ export default function BudgetTrackingTool() {
       )}
       {okAccounts.length > 1 && !blendedCurrency && (
         <p className="text-xs text-(--text-muted)">
-          Accounts use different currencies, so the totals and chart below only cover a single-currency
-          subset when one exists — otherwise per-campaign figures in the table are still exact.
+          Accounts use different currencies, so the stat cards above only cover a single-currency subset
+          when one exists — per-account figures in the tables below are still exact.
         </p>
       )}
 
@@ -336,11 +358,22 @@ export default function BudgetTrackingTool() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-black/10 dark:border-white/10 text-left text-xs text-(--text-muted)">
-                      <SortableHeader label="Ad accounts" sortKey="name" sort={sort} onClick={toggleSort} />
+                      <SortableHeader label="Ad accounts" sortKey="name" sort={pacingSort} onClick={togglePacingSort} />
                       <th className="px-4 py-2.5 font-medium text-right">Budget target</th>
-                      <SortableHeader label="Total budget" sortKey="consumptionPercent" sort={sort} onClick={toggleSort} />
+                      <SortableHeader
+                        label="Total budget"
+                        sortKey="consumptionPercent"
+                        sort={pacingSort}
+                        onClick={togglePacingSort}
+                      />
                       <th className="px-4 py-2.5 font-medium text-right">Spend</th>
-                      <SortableHeader label="Pacing" sortKey="pacingPercent" sort={sort} onClick={toggleSort} align="right" />
+                      <SortableHeader
+                        label="Pacing"
+                        sortKey="pacingPercent"
+                        sort={pacingSort}
+                        onClick={togglePacingSort}
+                        align="right"
+                      />
                     </tr>
                   </thead>
                   <tbody className="[font-variant-numeric:tabular-nums]">
@@ -361,19 +394,74 @@ export default function BudgetTrackingTool() {
       )}
 
       {subTab === "analytics" && (
-        <div className="rounded-xl border border-black/10 dark:border-white/15 bg-(--surface-1) p-5">
-          {chartPoints.length > 1 ? (
-            <>
-              <p className="text-sm font-medium mb-1">Spend vs. pace</p>
-              <p className="text-xs text-(--text-muted) mb-4">Cumulative spend this month vs. an even budget pace</p>
-              <SpendPacingChart points={chartPoints} currency={blendedCurrency ?? "USD"} />
-            </>
-          ) : (
-            <p className="text-sm text-(--text-muted)">
-              {loading && !data
-                ? "Loading analytics…"
-                : "Analytics needs at least one account with a daily budget to chart a pace."}
-            </p>
+        <div className="rounded-xl border border-black/10 dark:border-white/15 bg-(--surface-1) overflow-hidden">
+          {loading && !data && <p className="text-sm text-(--text-muted) px-5 py-4">Loading analytics…</p>}
+          {data && sortedAnalyticsRows.length === 0 && (
+            <p className="text-sm text-(--text-muted) px-5 py-4">No accounts with active or paused campaigns found.</p>
+          )}
+          {sortedAnalyticsRows.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-black/10 dark:border-white/10 text-left text-xs text-(--text-muted)">
+                    <SortableHeader label="Client" sortKey="name" sort={analyticsSort} onClick={toggleAnalyticsSort} />
+                    <SortableHeader
+                      label="Cost per click"
+                      sortKey="costPerClickMicros"
+                      sort={analyticsSort}
+                      onClick={toggleAnalyticsSort}
+                      align="right"
+                    />
+                    <SortableHeader
+                      label="Spend"
+                      sortKey="mtdSpendMicros"
+                      sort={analyticsSort}
+                      onClick={toggleAnalyticsSort}
+                      align="right"
+                    />
+                    <SortableHeader
+                      label="Conversion rate"
+                      sortKey="conversionRatePercent"
+                      sort={analyticsSort}
+                      onClick={toggleAnalyticsSort}
+                      align="right"
+                    />
+                    <SortableHeader
+                      label="Conversions"
+                      sortKey="mtdConversions"
+                      sort={analyticsSort}
+                      onClick={toggleAnalyticsSort}
+                      align="right"
+                    />
+                    <SortableHeader
+                      label="Cost per conversion"
+                      sortKey="costPerConversionMicros"
+                      sort={analyticsSort}
+                      onClick={toggleAnalyticsSort}
+                      align="right"
+                    />
+                  </tr>
+                </thead>
+                <tbody className="[font-variant-numeric:tabular-nums]">
+                  {sortedAnalyticsRows.map((a) => (
+                    <tr key={a.id} className="border-b border-black/5 dark:border-white/10 last:border-0">
+                      <td className="px-4 py-3 font-medium max-w-[220px] truncate">{a.name}</td>
+                      <td className="px-4 py-3 text-right">
+                        {formatBidMicros(a.costPerClickMicros, a.currencyCode)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {formatBidMicros(a.totals.mtdSpendMicros, a.currencyCode)}
+                      </td>
+                      <td className="px-4 py-3 text-right">{formatPercent(a.conversionRatePercent)}</td>
+                      <td className="px-4 py-3 text-right">{formatConversions(a.totals.mtdConversions)}</td>
+                      <td className="px-4 py-3 text-right">
+                        {formatBidMicros(a.costPerConversionMicros, a.currencyCode)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
@@ -500,7 +588,7 @@ function BudgetProgressCell({
   );
 }
 
-function SortableHeader({
+function SortableHeader<K extends string>({
   label,
   sortKey,
   sort,
@@ -508,9 +596,9 @@ function SortableHeader({
   align,
 }: {
   label: string;
-  sortKey: AccountSortKey;
-  sort: { key: AccountSortKey; dir: "asc" | "desc" };
-  onClick: (key: AccountSortKey) => void;
+  sortKey: K;
+  sort: { key: K; dir: "asc" | "desc" };
+  onClick: (key: K) => void;
   align?: "right";
 }) {
   const isActive = sort.key === sortKey;

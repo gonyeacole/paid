@@ -11,12 +11,3 @@ export function formatBidMicros(micros: number | null, currency = "USD"): string
     maximumFractionDigits: 2,
   }).format(micros / 1_000_000);
 }
-
-export function formatCompactMicros(micros: number, currency = "USD"): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(micros / 1_000_000);
-}
