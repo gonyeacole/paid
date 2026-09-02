@@ -51,6 +51,14 @@ export function IconTarget(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconChevronRight(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" strokeWidth={1.5} stroke="currentColor" {...props}>
+      <path d="m7.5 4.5 6 5.5-6 5.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function IconCalendar(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 20 20" fill="none" strokeWidth={1.5} stroke="currentColor" {...props}>

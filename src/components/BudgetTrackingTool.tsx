@@ -128,18 +128,12 @@ function pacingTextColor(percent: number | null): string {
   return "text-(--status-good)";
 }
 
-const SUB_TABS = [
-  { id: "pacing", label: "Budget Pacing" },
-  { id: "analytics", label: "Analytics" },
-] as const;
+type BudgetSubTabId = "pacing" | "analytics";
 
-type SubTabId = (typeof SUB_TABS)[number]["id"];
-
-export default function BudgetTrackingTool() {
+export default function BudgetTrackingTool({ activeSubTab }: { activeSubTab: BudgetSubTabId }) {
   const [data, setData] = useState<BudgetData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [subTab, setSubTab] = useState<SubTabId>("pacing");
   const [pacingSort, setPacingSort] = useState<{ key: PacingSortKey; dir: "asc" | "desc" }>({
     key: "name",
     dir: "asc",
@@ -292,24 +286,7 @@ export default function BudgetTrackingTool() {
         </p>
       )}
 
-      <div className="flex gap-2 border-b border-black/10 dark:border-white/15">
-        {SUB_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setSubTab(tab.id)}
-            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              subTab === tab.id
-                ? "border-(--series-1) text-(--series-1)"
-                : "border-transparent text-(--text-muted) hover:text-(--text-primary)"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {subTab === "pacing" && (
+      {activeSubTab === "pacing" && (
         <>
           {grandTotals && blendedCurrency && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -393,7 +370,7 @@ export default function BudgetTrackingTool() {
         </>
       )}
 
-      {subTab === "analytics" && (
+      {activeSubTab === "analytics" && (
         <div className="rounded-xl border border-black/10 dark:border-white/15 bg-(--surface-1) overflow-hidden">
           {loading && !data && <p className="text-sm text-(--text-muted) px-5 py-4">Loading analytics…</p>}
           {data && sortedAnalyticsRows.length === 0 && (
