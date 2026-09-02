@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "get-refresh-token": "node scripts/get-refresh-token.mjs"
   },
   "dependencies": {
     "google-ads-api": "^24.1.0",

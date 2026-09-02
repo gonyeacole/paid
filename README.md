@@ -36,10 +36,11 @@ You need five values, all from Google:
    with the Google Ads API enabled.
 3. **Refresh token** — Run the OAuth consent flow once for the Google account that has
    access to your Ads account, using the client ID/secret above and the
-   `https://www.googleapis.com/auth/adwords` scope. The
-   [Google Ads API quickstart](https://developers.google.com/google-ads/api/docs/oauth/cloud-console)
-   or the `google-ads-api` package's `GoogleAdsApi.listAccessibleCustomers` helper can walk
-   you through this — the result is a long-lived refresh token.
+   `https://www.googleapis.com/auth/adwords` scope. Run
+   `npm run get-refresh-token` on a machine with a real browser (it starts a local server
+   to catch the redirect, so it won't work in a headless/remote session) — it prints an
+   authorization URL, walks you through approving access, and prints the refresh token.
+   `scripts/get-refresh-token.mjs` is the whole flow, self-contained, no extra dependencies.
 4. **Customer ID** — The 10-digit Google Ads account ID to query, no dashes.
 5. **Login customer ID** — required if `Customer ID` is a client account under a manager/MCC
    account (the manager's 10-digit ID). Also required for Paid Dashboards, where it must be
