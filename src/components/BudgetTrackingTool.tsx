@@ -45,9 +45,17 @@ type Totals = {
   projectedMonthSpendMicros: number;
 };
 
-type CampaignRow = CampaignBudget & { accountId: string; accountName: string };
+type AccountRow = {
+  id: string;
+  name: string;
+  currencyCode: string;
+  campaigns: CampaignBudget[];
+  totals: Totals;
+  pacingPercent: number | null;
+  consumptionPercent: number | null;
+};
 
-type SortKey = "name" | "accountName" | "dailyBudgetMicros" | "todaySpendMicros" | "mtdSpendMicros" | "mtdPacingPercent";
+type AccountSortKey = "name" | "consumptionPercent" | "pacingPercent";
 
 const STATUS_LABELS: Record<string, string> = {
   ENABLED: "Active",
@@ -89,6 +97,13 @@ function pacingStatus(percent: number | null): { label: string; className: strin
   return { label: "On pace", className: "text-(--status-good) bg-(--status-good)/10" };
 }
 
+function pacingTextColor(percent: number | null): string {
+  if (percent === null) return "text-(--text-muted)";
+  if (percent > 110) return "text-(--status-critical)";
+  if (percent < 85) return "text-(--status-warning)";
+  return "text-(--status-good)";
+}
+
 const SUB_TABS = [
   { id: "pacing", label: "Budget Pacing" },
   { id: "analytics", label: "Analytics" },
@@ -101,10 +116,11 @@ export default function BudgetTrackingTool() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<SubTabId>("pacing");
-  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
-    key: "dailyBudgetMicros",
-    dir: "desc",
+  const [sort, setSort] = useState<{ key: AccountSortKey; dir: "asc" | "desc" }>({
+    key: "name",
+    dir: "asc",
   });
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -165,18 +181,32 @@ export default function BudgetTrackingTool() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, grandTotals]);
 
-  const campaignRows: CampaignRow[] = useMemo(
+  const accountRows: AccountRow[] = useMemo(
     () =>
       (data?.accounts ?? [])
         .filter((a) => !a.error)
-        .flatMap((a) =>
-          a.campaigns.map((c) => ({ ...c, accountId: a.id, accountName: a.name ?? `Account ${a.id}` }))
-        ),
+        .map((a) => {
+          const totals = sumTotals(a.campaigns);
+          const pacingPercent = mtdPacingPercent(totals);
+          const consumptionPercent =
+            totals.monthlyBudgetTargetMicros > 0
+              ? (totals.mtdSpendMicros / totals.monthlyBudgetTargetMicros) * 100
+              : null;
+          return {
+            id: a.id,
+            name: a.name ?? `Account ${a.id}`,
+            currencyCode: a.currencyCode,
+            campaigns: a.campaigns,
+            totals,
+            pacingPercent,
+            consumptionPercent,
+          };
+        }),
     [data]
   );
 
-  const sortedRows = useMemo(() => {
-    const rows = [...campaignRows];
+  const sortedAccountRows = useMemo(() => {
+    const rows = [...accountRows];
     const { key, dir } = sort;
     rows.sort((a, b) => {
       const av = a[key];
@@ -190,14 +220,20 @@ export default function BudgetTrackingTool() {
       return dir === "asc" ? cmp : -cmp;
     });
     return rows;
-  }, [campaignRows, sort]);
+  }, [accountRows, sort]);
 
-  function toggleSort(key: SortKey) {
+  function toggleSort(key: AccountSortKey) {
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }));
   }
 
-  const currencyForColumn = blendedCurrency ?? "USD";
-  const showAccountColumn = accounts.length > 1;
+  function toggleExpanded(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -291,47 +327,31 @@ export default function BudgetTrackingTool() {
           )}
 
           <div className="rounded-xl border border-black/10 dark:border-white/15 bg-(--surface-1) overflow-hidden">
-            <p className="text-sm font-medium px-5 pt-4 pb-3">Campaigns</p>
-            {loading && !data && <p className="text-sm text-(--text-muted) px-5 pb-4">Loading campaign budgets…</p>}
-            {data && campaignRows.length === 0 && (
-              <p className="text-sm text-(--text-muted) px-5 pb-4">No active or paused campaigns found.</p>
+            {loading && !data && <p className="text-sm text-(--text-muted) px-5 py-4">Loading account budgets…</p>}
+            {data && accountRows.length === 0 && (
+              <p className="text-sm text-(--text-muted) px-5 py-4">No accounts with active or paused campaigns found.</p>
             )}
-            {campaignRows.length > 0 && (
+            {accountRows.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-t border-b border-black/10 dark:border-white/10 text-left text-xs text-(--text-muted)">
-                      <SortableHeader label="Campaign" sortKey="name" sort={sort} onClick={toggleSort} />
-                      {showAccountColumn && <SortableHeader label="Account" sortKey="accountName" sort={sort} onClick={toggleSort} />}
-                      <th className="px-4 py-2.5 font-medium">Status</th>
-                      <SortableHeader label="Daily budget" sortKey="dailyBudgetMicros" sort={sort} onClick={toggleSort} align="right" />
-                      <SortableHeader label="Spent today" sortKey="todaySpendMicros" sort={sort} onClick={toggleSort} align="right" />
-                      <SortableHeader label="Spent MTD" sortKey="mtdSpendMicros" sort={sort} onClick={toggleSort} align="right" />
-                      <SortableHeader label="Pacing" sortKey="mtdPacingPercent" sort={sort} onClick={toggleSort} />
+                    <tr className="border-b border-black/10 dark:border-white/10 text-left text-xs text-(--text-muted)">
+                      <SortableHeader label="Ad accounts" sortKey="name" sort={sort} onClick={toggleSort} />
+                      <th className="px-4 py-2.5 font-medium text-right">Budget target</th>
+                      <SortableHeader label="Total budget" sortKey="consumptionPercent" sort={sort} onClick={toggleSort} />
+                      <th className="px-4 py-2.5 font-medium text-right">Spend</th>
+                      <SortableHeader label="Pacing" sortKey="pacingPercent" sort={sort} onClick={toggleSort} align="right" />
                     </tr>
                   </thead>
                   <tbody className="[font-variant-numeric:tabular-nums]">
-                    {sortedRows.map((c) => {
-                      const status = pacingStatus(c.mtdPacingPercent);
-                      const currency = blendedCurrency ?? currencyForColumn;
-                      return (
-                        <tr key={`${c.accountId}-${c.id}`} className="border-b border-black/5 dark:border-white/10 last:border-0">
-                          <td className="px-4 py-2.5 font-medium max-w-[220px] truncate">{c.name}</td>
-                          {showAccountColumn && (
-                            <td className="px-4 py-2.5 text-(--text-secondary) max-w-[160px] truncate">{c.accountName}</td>
-                          )}
-                          <td className="px-4 py-2.5 text-(--text-secondary)">{STATUS_LABELS[c.status] ?? c.status}</td>
-                          <td className="px-4 py-2.5 text-right">{formatBidMicros(c.dailyBudgetMicros, currency)}</td>
-                          <td className="px-4 py-2.5 text-right">{formatBidMicros(c.todaySpendMicros, currency)}</td>
-                          <td className="px-4 py-2.5 text-right">{formatBidMicros(c.mtdSpendMicros, currency)}</td>
-                          <td className="px-4 py-2.5">
-                            <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>
-                              {status.label}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {sortedAccountRows.map((a) => (
+                      <AccountRowGroup
+                        key={a.id}
+                        account={a}
+                        isExpanded={expanded.has(a.id)}
+                        onToggle={() => toggleExpanded(a.id)}
+                      />
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -361,6 +381,125 @@ export default function BudgetTrackingTool() {
   );
 }
 
+function AccountRowGroup({
+  account,
+  isExpanded,
+  onToggle,
+}: {
+  account: AccountRow;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <>
+      <tr
+        onClick={onToggle}
+        className="border-b border-black/5 dark:border-white/10 cursor-pointer hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+      >
+        <td className="px-4 py-3 font-medium">
+          <span className="inline-flex items-center gap-2">
+            <span
+              className="inline-block text-(--text-muted) transition-transform"
+              style={{ transform: isExpanded ? "rotate(90deg)" : "none" }}
+            >
+              ▸
+            </span>
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-black/5 dark:bg-white/10 px-1.5 text-xs font-normal text-(--text-secondary)">
+              {account.campaigns.length}
+            </span>
+            {account.name}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-right">
+          {formatBidMicros(account.totals.expectedMtdBudgetMicros, account.currencyCode)}
+        </td>
+        <td className="px-4 py-3">
+          <BudgetProgressCell
+            percent={account.consumptionPercent}
+            amount={account.totals.monthlyBudgetTargetMicros}
+            currency={account.currencyCode}
+            colorPercent={account.pacingPercent}
+          />
+        </td>
+        <td className="px-4 py-3 text-right">{formatBidMicros(account.totals.mtdSpendMicros, account.currencyCode)}</td>
+        <td className={`px-4 py-3 text-right font-medium ${pacingTextColor(account.pacingPercent)}`}>
+          {account.pacingPercent !== null ? `${Math.round(account.pacingPercent)}%` : "—"}
+        </td>
+      </tr>
+      {isExpanded &&
+        account.campaigns.map((c) => {
+          const campaignConsumption =
+            c.monthlyBudgetTargetMicros > 0 ? (c.mtdSpendMicros / c.monthlyBudgetTargetMicros) * 100 : null;
+          return (
+            <tr key={c.id} className="border-b border-black/5 dark:border-white/10 bg-black/[0.015] dark:bg-white/[0.02]">
+              <td className="pl-11 pr-4 py-2.5 text-(--text-secondary)">
+                {c.name}
+                {c.status !== "ENABLED" && (
+                  <span className="ml-1.5 text-xs text-(--text-muted)">({STATUS_LABELS[c.status] ?? c.status})</span>
+                )}
+              </td>
+              <td className="px-4 py-2.5 text-right text-(--text-secondary)">
+                {formatBidMicros(c.expectedMtdBudgetMicros, account.currencyCode)}
+              </td>
+              <td className="px-4 py-2.5">
+                <BudgetProgressCell
+                  percent={campaignConsumption}
+                  amount={c.monthlyBudgetTargetMicros}
+                  currency={account.currencyCode}
+                  colorPercent={c.mtdPacingPercent}
+                  muted
+                />
+              </td>
+              <td className="px-4 py-2.5 text-right text-(--text-secondary)">
+                {formatBidMicros(c.mtdSpendMicros, account.currencyCode)}
+              </td>
+              <td className={`px-4 py-2.5 text-right ${pacingTextColor(c.mtdPacingPercent)}`}>
+                {c.mtdPacingPercent !== null ? `${Math.round(c.mtdPacingPercent)}%` : "—"}
+              </td>
+            </tr>
+          );
+        })}
+    </>
+  );
+}
+
+function BudgetProgressCell({
+  percent,
+  amount,
+  currency,
+  colorPercent,
+  muted,
+}: {
+  percent: number | null;
+  amount: number;
+  currency: string;
+  colorPercent: number | null;
+  muted?: boolean;
+}) {
+  const barColor =
+    colorPercent === null
+      ? "bg-gray-300"
+      : colorPercent > 110
+        ? "bg-(--status-critical)"
+        : colorPercent < 85
+          ? "bg-(--status-warning)"
+          : "bg-(--status-good)";
+  const width = percent === null ? 0 : Math.min(100, Math.max(0, percent));
+  return (
+    <div className="flex items-center gap-2.5 min-w-[180px]">
+      <span className={`w-9 shrink-0 text-xs font-medium ${pacingTextColor(colorPercent)}`}>
+        {percent !== null ? `${Math.round(percent)}%` : "—"}
+      </span>
+      <div className="h-1.5 flex-1 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${width}%` }} />
+      </div>
+      <span className={`shrink-0 text-xs ${muted ? "text-(--text-muted)" : "text-(--text-secondary)"}`}>
+        {formatBidMicros(amount, currency)}
+      </span>
+    </div>
+  );
+}
+
 function SortableHeader({
   label,
   sortKey,
@@ -369,9 +508,9 @@ function SortableHeader({
   align,
 }: {
   label: string;
-  sortKey: SortKey;
-  sort: { key: SortKey; dir: "asc" | "desc" };
-  onClick: (key: SortKey) => void;
+  sortKey: AccountSortKey;
+  sort: { key: AccountSortKey; dir: "asc" | "desc" };
+  onClick: (key: AccountSortKey) => void;
   align?: "right";
 }) {
   const isActive = sort.key === sortKey;
