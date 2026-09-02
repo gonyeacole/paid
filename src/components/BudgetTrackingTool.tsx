@@ -89,10 +89,18 @@ function pacingStatus(percent: number | null): { label: string; className: strin
   return { label: "On pace", className: "text-(--status-good) bg-(--status-good)/10" };
 }
 
+const SUB_TABS = [
+  { id: "pacing", label: "Budget Pacing" },
+  { id: "analytics", label: "Analytics" },
+] as const;
+
+type SubTabId = (typeof SUB_TABS)[number]["id"];
+
 export default function BudgetTrackingTool() {
   const [data, setData] = useState<BudgetData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [subTab, setSubTab] = useState<SubTabId>("pacing");
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
     key: "dailyBudgetMicros",
     dir: "desc",
@@ -226,98 +234,129 @@ export default function BudgetTrackingTool() {
         </p>
       )}
 
-      {grandTotals && blendedCurrency && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard
-            icon={IconWallet}
-            label="Daily budget"
-            value={formatBidMicros(grandTotals.dailyBudgetMicros, blendedCurrency)}
-          />
-          <StatCard
-            icon={IconTarget}
-            label="Spent today"
-            value={formatBidMicros(grandTotals.todaySpendMicros, blendedCurrency)}
-            pill={
-              grandTotals.dailyBudgetMicros > 0
-                ? `${Math.round((grandTotals.todaySpendMicros / grandTotals.dailyBudgetMicros) * 100)}% of daily budget`
-                : undefined
-            }
-          />
-          <StatCard
-            icon={IconCalendar}
-            label="Spent month-to-date"
-            value={formatBidMicros(grandTotals.mtdSpendMicros, blendedCurrency)}
-            pill={grandPacing !== null ? `${Math.round(grandPacing)}% of pace` : undefined}
-            pillClassName={grandStatus.className}
-          />
-          <StatCard
-            icon={IconTrendingUp}
-            label="Projected month total"
-            value={formatBidMicros(grandTotals.projectedMonthSpendMicros, blendedCurrency)}
-            pill={
-              grandTotals.monthlyBudgetTargetMicros > 0
-                ? `vs ${formatBidMicros(grandTotals.monthlyBudgetTargetMicros, blendedCurrency)} budget`
-                : undefined
-            }
-          />
-        </div>
-      )}
-
-      {chartPoints.length > 1 && (
-        <div className="rounded-xl border border-black/10 dark:border-white/15 bg-(--surface-1) p-5">
-          <p className="text-sm font-medium mb-1">Analytics</p>
-          <p className="text-xs text-(--text-muted) mb-4">Cumulative spend this month vs. an even budget pace</p>
-          <SpendPacingChart points={chartPoints} currency={blendedCurrency ?? "USD"} />
-        </div>
-      )}
-
-      <div className="rounded-xl border border-black/10 dark:border-white/15 bg-(--surface-1) overflow-hidden">
-        <p className="text-sm font-medium px-5 pt-4 pb-3">Campaigns</p>
-        {loading && !data && <p className="text-sm text-(--text-muted) px-5 pb-4">Loading campaign budgets…</p>}
-        {data && campaignRows.length === 0 && (
-          <p className="text-sm text-(--text-muted) px-5 pb-4">No active or paused campaigns found.</p>
-        )}
-        {campaignRows.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-t border-b border-black/10 dark:border-white/10 text-left text-xs text-(--text-muted)">
-                  <SortableHeader label="Campaign" sortKey="name" sort={sort} onClick={toggleSort} />
-                  {showAccountColumn && <SortableHeader label="Account" sortKey="accountName" sort={sort} onClick={toggleSort} />}
-                  <th className="px-4 py-2.5 font-medium">Status</th>
-                  <SortableHeader label="Daily budget" sortKey="dailyBudgetMicros" sort={sort} onClick={toggleSort} align="right" />
-                  <SortableHeader label="Spent today" sortKey="todaySpendMicros" sort={sort} onClick={toggleSort} align="right" />
-                  <SortableHeader label="Spent MTD" sortKey="mtdSpendMicros" sort={sort} onClick={toggleSort} align="right" />
-                  <SortableHeader label="Pacing" sortKey="mtdPacingPercent" sort={sort} onClick={toggleSort} />
-                </tr>
-              </thead>
-              <tbody className="[font-variant-numeric:tabular-nums]">
-                {sortedRows.map((c) => {
-                  const status = pacingStatus(c.mtdPacingPercent);
-                  const currency = blendedCurrency ?? currencyForColumn;
-                  return (
-                    <tr key={`${c.accountId}-${c.id}`} className="border-b border-black/5 dark:border-white/10 last:border-0">
-                      <td className="px-4 py-2.5 font-medium max-w-[220px] truncate">{c.name}</td>
-                      {showAccountColumn && (
-                        <td className="px-4 py-2.5 text-(--text-secondary) max-w-[160px] truncate">{c.accountName}</td>
-                      )}
-                      <td className="px-4 py-2.5 text-(--text-secondary)">{STATUS_LABELS[c.status] ?? c.status}</td>
-                      <td className="px-4 py-2.5 text-right">{formatBidMicros(c.dailyBudgetMicros, currency)}</td>
-                      <td className="px-4 py-2.5 text-right">{formatBidMicros(c.todaySpendMicros, currency)}</td>
-                      <td className="px-4 py-2.5 text-right">{formatBidMicros(c.mtdSpendMicros, currency)}</td>
-                      <td className="px-4 py-2.5">
-                        <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>
-                          {status.label}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <div className="flex gap-2 border-b border-black/10 dark:border-white/15">
+        {SUB_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setSubTab(tab.id)}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              subTab === tab.id
+                ? "border-(--series-1) text-(--series-1)"
+                : "border-transparent text-(--text-muted) hover:text-(--text-primary)"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
+
+      {subTab === "pacing" && (
+        <>
+          {grandTotals && blendedCurrency && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <StatCard
+                icon={IconWallet}
+                label="Daily budget"
+                value={formatBidMicros(grandTotals.dailyBudgetMicros, blendedCurrency)}
+              />
+              <StatCard
+                icon={IconTarget}
+                label="Spent today"
+                value={formatBidMicros(grandTotals.todaySpendMicros, blendedCurrency)}
+                pill={
+                  grandTotals.dailyBudgetMicros > 0
+                    ? `${Math.round((grandTotals.todaySpendMicros / grandTotals.dailyBudgetMicros) * 100)}% of daily budget`
+                    : undefined
+                }
+              />
+              <StatCard
+                icon={IconCalendar}
+                label="Spent month-to-date"
+                value={formatBidMicros(grandTotals.mtdSpendMicros, blendedCurrency)}
+                pill={grandPacing !== null ? `${Math.round(grandPacing)}% of pace` : undefined}
+                pillClassName={grandStatus.className}
+              />
+              <StatCard
+                icon={IconTrendingUp}
+                label="Projected month total"
+                value={formatBidMicros(grandTotals.projectedMonthSpendMicros, blendedCurrency)}
+                pill={
+                  grandTotals.monthlyBudgetTargetMicros > 0
+                    ? `vs ${formatBidMicros(grandTotals.monthlyBudgetTargetMicros, blendedCurrency)} budget`
+                    : undefined
+                }
+              />
+            </div>
+          )}
+
+          <div className="rounded-xl border border-black/10 dark:border-white/15 bg-(--surface-1) overflow-hidden">
+            <p className="text-sm font-medium px-5 pt-4 pb-3">Campaigns</p>
+            {loading && !data && <p className="text-sm text-(--text-muted) px-5 pb-4">Loading campaign budgets…</p>}
+            {data && campaignRows.length === 0 && (
+              <p className="text-sm text-(--text-muted) px-5 pb-4">No active or paused campaigns found.</p>
+            )}
+            {campaignRows.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-t border-b border-black/10 dark:border-white/10 text-left text-xs text-(--text-muted)">
+                      <SortableHeader label="Campaign" sortKey="name" sort={sort} onClick={toggleSort} />
+                      {showAccountColumn && <SortableHeader label="Account" sortKey="accountName" sort={sort} onClick={toggleSort} />}
+                      <th className="px-4 py-2.5 font-medium">Status</th>
+                      <SortableHeader label="Daily budget" sortKey="dailyBudgetMicros" sort={sort} onClick={toggleSort} align="right" />
+                      <SortableHeader label="Spent today" sortKey="todaySpendMicros" sort={sort} onClick={toggleSort} align="right" />
+                      <SortableHeader label="Spent MTD" sortKey="mtdSpendMicros" sort={sort} onClick={toggleSort} align="right" />
+                      <SortableHeader label="Pacing" sortKey="mtdPacingPercent" sort={sort} onClick={toggleSort} />
+                    </tr>
+                  </thead>
+                  <tbody className="[font-variant-numeric:tabular-nums]">
+                    {sortedRows.map((c) => {
+                      const status = pacingStatus(c.mtdPacingPercent);
+                      const currency = blendedCurrency ?? currencyForColumn;
+                      return (
+                        <tr key={`${c.accountId}-${c.id}`} className="border-b border-black/5 dark:border-white/10 last:border-0">
+                          <td className="px-4 py-2.5 font-medium max-w-[220px] truncate">{c.name}</td>
+                          {showAccountColumn && (
+                            <td className="px-4 py-2.5 text-(--text-secondary) max-w-[160px] truncate">{c.accountName}</td>
+                          )}
+                          <td className="px-4 py-2.5 text-(--text-secondary)">{STATUS_LABELS[c.status] ?? c.status}</td>
+                          <td className="px-4 py-2.5 text-right">{formatBidMicros(c.dailyBudgetMicros, currency)}</td>
+                          <td className="px-4 py-2.5 text-right">{formatBidMicros(c.todaySpendMicros, currency)}</td>
+                          <td className="px-4 py-2.5 text-right">{formatBidMicros(c.mtdSpendMicros, currency)}</td>
+                          <td className="px-4 py-2.5">
+                            <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>
+                              {status.label}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {subTab === "analytics" && (
+        <div className="rounded-xl border border-black/10 dark:border-white/15 bg-(--surface-1) p-5">
+          {chartPoints.length > 1 ? (
+            <>
+              <p className="text-sm font-medium mb-1">Spend vs. pace</p>
+              <p className="text-xs text-(--text-muted) mb-4">Cumulative spend this month vs. an even budget pace</p>
+              <SpendPacingChart points={chartPoints} currency={blendedCurrency ?? "USD"} />
+            </>
+          ) : (
+            <p className="text-sm text-(--text-muted)">
+              {loading && !data
+                ? "Loading analytics…"
+                : "Analytics needs at least one account with a daily budget to chart a pace."}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

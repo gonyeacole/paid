@@ -7,7 +7,7 @@ import BudgetTrackingTool from "@/components/BudgetTrackingTool";
 import { IconWallet, IconSearch, IconTrendingUp, IconExternalLink } from "@/components/dashboard/icons";
 
 const NAV_ITEMS = [
-  { id: "budget", label: "Budget tracking", icon: IconWallet },
+  { id: "budget", label: "Paid Dashboards", icon: IconWallet },
   { id: "discover", label: "Discover new keywords", icon: IconSearch },
   { id: "forecast", label: "Search volume & forecasts", icon: IconTrendingUp },
 ] as const;
